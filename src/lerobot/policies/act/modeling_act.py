@@ -128,8 +128,11 @@ class ACTPolicy(PreTrainedPolicy):
         if self.config.image_features:
             batch = dict(batch)  # shallow copy so that adding a key doesn't modify the original
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
-
+        print("PREDICTING NEW CHUNK")
         actions = self.model(batch)[0]
+        is_delta_actions = True
+        if is_delta_actions:
+            actions[..., :-1] = batch[OBS_STATE].unsqueeze(1)[..., :-1] + actions[..., :-1]
         return actions
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:

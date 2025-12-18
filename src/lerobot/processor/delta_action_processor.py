@@ -141,3 +141,72 @@ class MapDeltaActionToRobotActionStep(RobotActionProcessorStep):
             )
 
         return features
+
+
+from .core import EnvAction, EnvTransition, PolicyAction, RobotAction, TransitionKey
+class DeltaRobotActionProcessorStep(RobotActionProcessorStep):
+    """An abstract `ProcessorStep` for processing a `RobotAction` (a dictionary)."""
+    is_preprocess: bool = False
+    is_inference: bool = False
+
+    def __init__(self, is_preprocess: bool = False, is_inference: bool = False) -> None:
+        super().__init__()
+        self.is_preprocess = is_preprocess
+        self.is_inference = is_inference
+
+    def action(self, observation_state, action):
+        """Processes a `RobotAction`. Subclasses must implement this method.
+
+        Args:
+            observation_state: The input `RobotObservation` dictionary.
+            action: The input `RobotAction` dictionary.
+
+        Returns:
+            The processed `RobotAction`.
+        # """
+        gripper_idx = action.shape[-1] - 1
+        if self.is_preprocess:
+            delta_action = action - observation_state.unsqueeze(1)
+            delta_action[..., gripper_idx] = action[..., gripper_idx]  # gripper actions are absolute
+            return delta_action
+        else:
+            absolute_targets = action + observation_state.unsqueeze(1)
+            absolute_targets[..., gripper_idx] = action[..., gripper_idx]  # gripper actions are absolute
+            return absolute_targets
+        
+    def action_inference(self, obs, action):
+        processed_action = dict()
+        for k, v in action.items():
+            assert k in obs, f"Key {k} in action not found in observation"
+            # Gripper don't predict deltas, instead absolute gripper position
+            if "joint7" not in k:
+                assert k in obs, f"Key {k} in action not found in observation"
+                assert not self.is_preprocess
+                # Convert delta actions to absolute positions
+                processed_action[k] = v + obs[k]
+            else:
+                processed_action[k] = v  # gripper actions are absolute
+        return processed_action
+
+    def __call__(self, transition: EnvTransition) -> EnvTransition:
+        """Applies the `action` method to the transition's action, ensuring it's a `RobotAction`."""
+        self._current_transition = transition.copy()
+        new_transition = self._current_transition
+
+        action = new_transition.get(TransitionKey.ACTION)
+        observation = new_transition.get(TransitionKey.OBSERVATION)
+        if action is None or observation is None:
+            return new_transition
+
+        if self.is_inference:
+            processed_action = self.action_inference(observation, action)
+        else:
+            processed_action = self.action(observation["observation.state"], action)
+        new_transition[TransitionKey.ACTION] = processed_action
+        return new_transition
+
+    def transform_features(
+        self, features: dict[PipelineFeatureType, dict[str, PolicyFeature]]
+    ) -> dict[PipelineFeatureType, dict[str, PolicyFeature]]:
+        """Returns the features without modification."""
+        return features

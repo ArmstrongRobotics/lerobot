@@ -28,7 +28,7 @@ from .core import (
     RobotObservation,
     TransitionKey,
 )
-from .delta_action_processor import MapDeltaActionToRobotActionStep, MapTensorToDeltaActionDictStep
+from .delta_action_processor import MapDeltaActionToRobotActionStep, MapTensorToDeltaActionDictStep, DeltaRobotActionProcessorStep
 from .device_processor import DeviceProcessorStep
 from .factory import (
     make_default_processors,
@@ -68,7 +68,7 @@ from .pipeline import (
     RewardProcessorStep,
     RobotActionProcessorStep,
     RobotProcessorPipeline,
-    TruncatedProcessorStep,
+    TruncatedProcessorStep
 )
 from .policy_robot_bridge import (
     PolicyActionToRobotActionProcessorStep,
@@ -128,6 +128,7 @@ __all__ = [
     "transition_to_batch",
     "TransitionKey",
     "TruncatedProcessorStep",
+    "DeltaRobotActionProcessorStep",
     "UnnormalizerProcessorStep",
     "VanillaObservationProcessorStep",
 ]
