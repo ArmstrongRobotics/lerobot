@@ -1,6 +1,6 @@
 policy_type=act
 dataset=pnp_cup_merged_basic123_random_start
-job_name=${policy_type}_${dataset}_8x
+job_name=${policy_type}_${dataset}_8x_test
 lerobot-train \
   --dataset.repo_id=${HF_USER}/${dataset} \
   --policy.type=${policy_type} \
@@ -8,8 +8,6 @@ lerobot-train \
   --job_name=${job_name} \
   --policy.device=cuda \
   --wandb.enable=true \
-  --resume=true \
-  --config_path=outputs/train/act_pnp_cup_merged_basic123_random_start_8x/checkpoints/last/pretrained_model/train_config.json \
   --policy.repo_id=${HF_USER}/my_policy \
   --steps=800000
 

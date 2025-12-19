@@ -57,7 +57,7 @@ def make_act_pre_post_processors(
         RenameObservationsProcessorStep(rename_map={}),
         AddBatchDimensionProcessorStep(),
         DeviceProcessorStep(device=config.device),
-        DeltaRobotActionProcessorStep(is_input=True),
+        DeltaRobotActionProcessorStep(is_preprocess=True),
         NormalizerProcessorStep(
             features={**config.input_features, **config.output_features},
             norm_map=config.normalization_mapping,
@@ -69,7 +69,7 @@ def make_act_pre_post_processors(
         UnnormalizerProcessorStep(
             features=config.output_features, norm_map=config.normalization_mapping, stats=dataset_stats
         ),
-        DeltaRobotActionProcessorStep(is_input=False),
+        DeltaRobotActionProcessorStep(is_preprocess=False),
         DeviceProcessorStep(device="cpu"),
     ]
 
