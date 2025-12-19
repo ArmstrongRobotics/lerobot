@@ -15,4 +15,3 @@ lerobot-train \
 
 hf upload ${HF_USER}/${job_name} \
   outputs/train/${job_name}/checkpoints/last/pretrained_model
-=
