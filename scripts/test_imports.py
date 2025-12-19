@@ -1,0 +1,3 @@
+from lerobot.utils.import_utils import register_third_party_plugins
+
+register_third_party_plugins()
