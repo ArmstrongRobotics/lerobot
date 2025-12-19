@@ -52,6 +52,8 @@ from lerobot.utils.constants import (
     OBS_ENV_STATE
 )
 
+from peft import LoraConfig, get_peft_model, TaskType
+
 
 class ActionSelectKwargs(TypedDict, total=False):
     inference_delay: int | None
@@ -337,6 +339,12 @@ class PaliGemmaWithExpertModel(
         action_expert_config,
         use_adarms=None,
         precision: Literal["bfloat16", "float32"] = "bfloat16",
+        lora_r: int = 8,
+        lora_alpha: int = 16,
+        lora_dropout: float = 0.05,
+        lora_target_modules: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj"),
+        lora_on_vlm: bool = True,
+        lora_on_expert: bool = False,
     ):
         if use_adarms is None:
             use_adarms = [False, False]
@@ -375,11 +383,41 @@ class PaliGemmaWithExpertModel(
             adarms_cond_dim=action_expert_config.width if use_adarms[1] else None,
         )
 
+        self.lora_r = lora_r
+        self.lora_alpha = lora_alpha
+        self.lora_dropout = lora_dropout
+        self.lora_target_modules = lora_target_modules
+        self.lora_on_vlm = lora_on_vlm
+        self.lora_on_expert = lora_on_expert
+
         self.paligemma = PaliGemmaForConditionalGeneration(config=vlm_config_hf)
         self.gemma_expert = GemmaForCausalLM(config=action_expert_config_hf)
         self.gemma_expert.model.embed_tokens = None
 
         self.to_bfloat16_for_selected_params(precision)
+
+
+        if self.lora_on_vlm:
+            vlm_lora_config = LoraConfig(
+                r=self.lora_r,
+                lora_alpha=self.lora_alpha,
+                target_modules=list(self.lora_target_modules),
+                lora_dropout=self.lora_dropout,
+                bias="none",
+                task_type=TaskType.FEATURE_EXTRACTION,
+            )
+            self.paligemma = get_peft_model(self.paligemma, vlm_lora_config)
+
+        if self.lora_on_expert:
+            expert_lora_config = LoraConfig(
+                r=self.lora_r,
+                lora_alpha=self.lora_alpha,
+                target_modules=list(self.lora_target_modules),
+                lora_dropout=self.lora_dropout,
+                bias="none",
+                task_type=TaskType.FEATURE_EXTRACTION,
+            )
+            self.gemma_expert = get_peft_model(self.gemma_expert, expert_lora_config)
 
     def to_bfloat16_for_selected_params(self, precision: Literal["bfloat16", "float32"] = "bfloat16"):
         if precision == "bfloat16":
@@ -524,6 +562,12 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             action_expert_config,
             use_adarms=[False, True],
             precision=config.dtype,
+            lora_r=self.config.lora_r,
+            lora_alpha=self.config.lora_alpha,
+            lora_dropout=self.config.lora_dropout,
+            lora_target_modules=self.config.lora_target_modules,
+            lora_on_vlm=self.config.lora_on_vlm,
+            lora_on_expert=self.config.lora_on_expert,
         )
 
         self.action_in_proj = nn.Linear(config.max_action_dim, action_expert_config.width)
