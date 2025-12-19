@@ -49,6 +49,7 @@ from lerobot.utils.constants import (
     OBS_LANGUAGE_ATTENTION_MASK,
     OBS_LANGUAGE_TOKENS,
     OPENPI_ATTENTION_MASK_VALUE,
+    OBS_ENV_STATE
 )
 
 
@@ -1194,6 +1195,7 @@ class PI05Policy(PreTrainedPolicy):
     def predict_action_chunk(self, batch: dict[str, Tensor], **kwargs: Unpack[ActionSelectKwargs]) -> Tensor:
         """Predict a chunk of actions given environment observations."""
         self.eval()
+        print("PREDICTING NEW CHUNK")
 
         # Prepare inputs
         images, img_masks = self._preprocess_images(batch)
@@ -1201,6 +1203,11 @@ class PI05Policy(PreTrainedPolicy):
 
         # Sample actions using the model (pass through RTC kwargs, no separate state needed for PI05)
         actions = self.model.sample_actions(images, img_masks, tokens, masks, **kwargs)
+
+        is_delta_actions = True
+        if is_delta_actions:
+            # Gripper actions are absolute, not delta
+            actions[..., :-1] = batch[f"{OBS_ENV_STATE}"].unsqueeze(1)[..., :-1] + actions[..., :-1]
 
         # Unpad actions to actual action dimension
         original_action_dim = self.config.output_features[ACTION].shape[0]
