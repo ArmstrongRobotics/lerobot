@@ -148,11 +148,13 @@ class DeltaRobotActionProcessorStep(RobotActionProcessorStep):
     """An abstract `ProcessorStep` for processing a `RobotAction` (a dictionary)."""
     is_preprocess: bool = False
     is_inference: bool = False
+    active: bool = True
 
-    def __init__(self, is_preprocess: bool = False, is_inference: bool = False) -> None:
+    def __init__(self, is_preprocess: bool = False, is_inference: bool = False, active: bool = True) -> None:
         super().__init__()
         self.is_preprocess = is_preprocess
         self.is_inference = is_inference
+        self.active = active
 
     def action(self, observation_state, action):
         """Processes a `RobotAction`. Subclasses must implement this method.
@@ -190,6 +192,9 @@ class DeltaRobotActionProcessorStep(RobotActionProcessorStep):
 
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         """Applies the `action` method to the transition's action, ensuring it's a `RobotAction`."""
+        if not self.active:
+            return transition
+
         self._current_transition = transition.copy()
         new_transition = self._current_transition
 

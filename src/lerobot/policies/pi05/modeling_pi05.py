@@ -1238,8 +1238,8 @@ class PI05Policy(PreTrainedPolicy):
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor], **kwargs: Unpack[ActionSelectKwargs]) -> Tensor:
         """Predict a chunk of actions given environment observations."""
-        self.eval()
         print("PREDICTING NEW CHUNK")
+        self.eval()
 
         # Prepare inputs
         images, img_masks = self._preprocess_images(batch)
@@ -1248,15 +1248,13 @@ class PI05Policy(PreTrainedPolicy):
         # Sample actions using the model (pass through RTC kwargs, no separate state needed for PI05)
         actions = self.model.sample_actions(images, img_masks, tokens, masks, **kwargs)
 
-        is_delta_actions = True
-        if is_delta_actions:
-            # Gripper actions are absolute, not delta
-            actions[..., :-1] = batch[f"{OBS_ENV_STATE}"].unsqueeze(1)[..., :-1] + actions[..., :-1]
-
         # Unpad actions to actual action dimension
         original_action_dim = self.config.output_features[ACTION].shape[0]
         actions = actions[:, :, :original_action_dim]
 
+        if self.config.predict_delta_state:
+            # Gripper actions are absolute, not delta
+            actions[..., :-1] = batch[f"{OBS_ENV_STATE}"].unsqueeze(1)[..., :-1] + actions[..., :-1]
         return actions
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:

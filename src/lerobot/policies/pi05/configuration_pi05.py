@@ -50,6 +50,8 @@ class PI05Config(PreTrainedConfig):
     # Real-Time Chunking (RTC) configuration
     rtc_config: RTCConfig | None = None
 
+    predict_delta_state: bool = True
+
     # LoRA 
     lora_r: int = 8
     lora_alpha: int = 16

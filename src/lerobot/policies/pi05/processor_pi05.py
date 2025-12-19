@@ -35,6 +35,7 @@ from lerobot.processor import (
     RenameObservationsProcessorStep,
     TokenizerProcessorStep,
     UnnormalizerProcessorStep,
+    DeltaRobotActionProcessorStep
 )
 from lerobot.processor.converters import policy_action_to_transition, transition_to_policy_action
 from lerobot.processor.core import EnvTransition, TransitionKey
@@ -135,6 +136,7 @@ def make_pi05_pre_post_processors(
         AddBatchDimensionProcessorStep(),
         # NOTE: NormalizerProcessorStep MUST come before Pi05PrepareStateTokenizerProcessorStep
         # because the tokenizer step expects normalized state in [-1, 1] range for discretization
+        DeltaRobotActionProcessorStep(is_preprocess=True, active=config.predict_delta_state),
         NormalizerProcessorStep(
             features={**config.input_features, **config.output_features},
             norm_map=config.normalization_mapping,
@@ -154,6 +156,7 @@ def make_pi05_pre_post_processors(
         UnnormalizerProcessorStep(
             features=config.output_features, norm_map=config.normalization_mapping, stats=dataset_stats
         ),
+        DeltaRobotActionProcessorStep(is_preprocess=False, active=config.predict_delta_state),
         DeviceProcessorStep(device="cpu"),
     ]
 

@@ -130,8 +130,7 @@ class ACTPolicy(PreTrainedPolicy):
             batch[OBS_IMAGES] = [batch[key] for key in self.config.image_features]
         print("PREDICTING NEW CHUNK")
         actions = self.model(batch)[0]
-        is_delta_actions = True
-        if is_delta_actions:
+        if self.config.predict_delta_state:
             actions[..., :-1] = batch[OBS_STATE].unsqueeze(1)[..., :-1] + actions[..., :-1]
         return actions
 
