@@ -168,11 +168,13 @@ class DeltaRobotActionProcessorStep(RobotActionProcessorStep):
         # """
         gripper_idx = action.shape[-1] - 1
         if self.is_preprocess:
-            delta_action = action - observation_state.unsqueeze(1)
+            if observation_state.dim() < action.dim():
+                observation_state = observation_state.unsqueeze(1)
+            delta_action = action - observation_state
             delta_action[..., gripper_idx] = action[..., gripper_idx]  # gripper actions are absolute
             return delta_action
         else:
-            absolute_targets = action + observation_state.unsqueeze(1)
+            absolute_targets = action + observation_state
             absolute_targets[..., gripper_idx] = action[..., gripper_idx]  # gripper actions are absolute
             return absolute_targets
         
