@@ -72,6 +72,7 @@ import time
 import traceback
 from dataclasses import dataclass, field
 from threading import Event, Lock, Thread
+import numpy as np
 
 import torch
 from torch import Tensor
@@ -90,6 +91,7 @@ from lerobot.processor.factory import (
     make_default_robot_action_processor,
     make_default_robot_observation_processor,
 )
+from lerobot.policies.utils import prepare_observation_for_inference
 from lerobot.rl.process import ProcessSignalHandler
 from lerobot.robots import (  # noqa: F401
     Robot,
@@ -102,6 +104,8 @@ from lerobot.robots.utils import make_robot_from_config
 from lerobot.utils.constants import OBS_IMAGES
 from lerobot.utils.hub import HubMixin
 from lerobot.utils.utils import init_logging
+
+from lerobot.utils.import_utils import register_third_party_plugins
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -209,11 +213,74 @@ class RTCDemoConfig(HubMixin):
 def is_image_key(k: str) -> bool:
     return k.startswith(OBS_IMAGES)
 
+def process_obs_helper(obs, robot_observation_processor, dataset_features, policy_device, cfg, robot_name):
+    # Apply robot observation processor
+    obs_processed = robot_observation_processor(obs)
+
+    obs_with_policy_features = build_dataset_frame(
+        dataset_features, obs_processed, prefix="observation"
+    )
+
+    for name in obs_with_policy_features:
+        obs_with_policy_features[name] = torch.from_numpy(obs_with_policy_features[name])
+        if "image" in name:
+            obs_with_policy_features[name] = (
+                obs_with_policy_features[name].type(torch.float32) / 255
+            )
+            obs_with_policy_features[name] = (
+                obs_with_policy_features[name].permute(2, 0, 1).contiguous()
+            )
+        obs_with_policy_features[name] = obs_with_policy_features[name].unsqueeze(0)
+        obs_with_policy_features[name] = obs_with_policy_features[name].to(policy_device)
+
+    obs_with_policy_features["task"] = [cfg.task]  # Task should be a list, not a string!
+    obs_with_policy_features["robot_type"] = robot_name
+
+    return obs_with_policy_features
+
+def warmstart_policy(policy, robot_wrapper, robot_observation_processor, preprocessor, postprocessor, cfg):
+    """Warm start the policy with a dummy observation to prevent initial inference lag.
+
+    Args:
+        policy: The policy instance
+        robot_wrapper: The robot wrapper instance
+        robot_observation_processor: Processor for raw robot observations
+        preprocessor: Preprocessor for policy input
+        postprocessor: Postprocessor for policy output
+        cfg: Demo configuration
+    """
+    logger.info("[WARMSTART] Performing warm start of the policy with dummy observation")
+
+    obs_features = robot_wrapper.observation_features()
+    dataset_features = hw_to_dataset_features(obs_features, "observation")
+
+    for i in range(5):
+        dummy_obs = {}
+        for feature, value in obs_features.items():
+            if value == float:
+                dummy_obs[feature] = np.random.rand()
+            else:
+                dummy_obs[feature] = np.random.randint(0, 256, size=(480, 640, 3), dtype=np.uint8)
+                    
+
+        obs_with_policy_features = process_obs_helper(dummy_obs, robot_observation_processor, dataset_features, policy.config.device, cfg, robot_wrapper.robot.name if hasattr(robot_wrapper.robot, "name") else "")
+
+        preproceseded_obs = preprocessor(obs_with_policy_features)
+
+        with torch.no_grad():
+            _ = policy.predict_action_chunk(
+                preproceseded_obs,
+                inference_delay=0,
+                prev_chunk_left_over=None,
+            )
+
 
 def get_actions(
     policy,
     robot: RobotWrapper,
     robot_observation_processor,
+    preprocessor,
+    postprocessor,
     action_queue: ActionQueue,
     shutdown_event: Event,
     cfg: RTCDemoConfig,
@@ -242,15 +309,6 @@ def get_actions(
         # The stats are embedded in the processor .safetensors files
         logger.info(f"[GET_ACTIONS] Loading preprocessor/postprocessor from {cfg.policy.pretrained_path}")
 
-        preprocessor, postprocessor = make_pre_post_processors(
-            policy_cfg=cfg.policy,
-            pretrained_path=cfg.policy.pretrained_path,
-            dataset_stats=None,  # Will load from pretrained processor files
-            preprocessor_overrides={
-                "device_processor": {"device": cfg.policy.device},
-            },
-        )
-
         logger.info("[GET_ACTIONS] Preprocessor/postprocessor loaded successfully with embedded stats")
 
         get_actions_threshold = cfg.action_queue_size_to_get_new_actions
@@ -268,30 +326,8 @@ def get_actions(
                 inference_delay = math.ceil(inference_latency / time_per_chunk)
 
                 obs = robot.get_observation()
-
-                # Apply robot observation processor
-                obs_processed = robot_observation_processor(obs)
-
-                obs_with_policy_features = build_dataset_frame(
-                    dataset_features, obs_processed, prefix="observation"
-                )
-
-                for name in obs_with_policy_features:
-                    obs_with_policy_features[name] = torch.from_numpy(obs_with_policy_features[name])
-                    if "image" in name:
-                        obs_with_policy_features[name] = (
-                            obs_with_policy_features[name].type(torch.float32) / 255
-                        )
-                        obs_with_policy_features[name] = (
-                            obs_with_policy_features[name].permute(2, 0, 1).contiguous()
-                        )
-                    obs_with_policy_features[name] = obs_with_policy_features[name].unsqueeze(0)
-                    obs_with_policy_features[name] = obs_with_policy_features[name].to(policy_device)
-
-                obs_with_policy_features["task"] = [cfg.task]  # Task should be a list, not a string!
-                obs_with_policy_features["robot_type"] = (
-                    robot.robot.name if hasattr(robot.robot, "name") else ""
-                )
+                
+                obs_with_policy_features = process_obs_helper(obs, robot_observation_processor, dataset_features, policy_device, cfg, robot.robot.name if hasattr(robot.robot, "name") else "")
 
                 preproceseded_obs = preprocessor(obs_with_policy_features)
 
@@ -315,7 +351,9 @@ def get_actions(
 
                 if cfg.action_queue_size_to_get_new_actions < cfg.rtc.execution_horizon + new_delay:
                     logger.warning(
-                        "[GET_ACTIONS] cfg.action_queue_size_to_get_new_actions Too small, It should be higher than inference delay + execution horizon."
+                        "[GET_ACTIONS] cfg.action_queue_size_to_get_new_actions Too small, It should be higher than inference delay + execution horizon. Delay: "
+                        f"{new_delay}, execution_horizon: {cfg.rtc.execution_horizon}, "
+                        f"action_queue_size_to_get_new_actions: {cfg.action_queue_size_to_get_new_actions}"
                     )
 
                 action_queue.merge(
@@ -410,12 +448,12 @@ def _apply_torch_compile(policy, cfg: RTCDemoConfig):
         # - CUDA graphs disabled to prevent tensor aliasing from in-place ops (x_t += dt * v_t)
         compile_kwargs = {
             "backend": cfg.torch_compile_backend,
-            "mode": cfg.torch_compile_mode,
+            # "mode": cfg.torch_compile_mode,
         }
 
         # Disable CUDA graphs if requested (prevents tensor aliasing issues)
         if cfg.torch_compile_disable_cudagraphs:
-            compile_kwargs["options"] = {"triton.cudagraphs": False}
+            compile_kwargs["options"] = {"triton.cudagraphs": False, "epilogue_fusion": False}
 
         original_method = policy.predict_action_chunk
         compiled_method = torch.compile(original_method, **compile_kwargs)
@@ -452,8 +490,8 @@ def demo_cli(cfg: RTCDemoConfig):
     # Load config and set compile_model for pi0/pi05 models
     config = PreTrainedConfig.from_pretrained(cfg.policy.pretrained_path)
 
-    if cfg.policy.type == "pi05" or cfg.policy.type == "pi0":
-        config.compile_model = cfg.use_torch_compile
+    # if cfg.policy.type == "pi05" or cfg.policy.type == "pi0":
+    #     config.compile_model = cfg.use_torch_compile
 
     policy = policy_class.from_pretrained(cfg.policy.pretrained_path, config=config)
 
@@ -470,18 +508,34 @@ def demo_cli(cfg: RTCDemoConfig):
     policy.eval()
 
     # Apply torch.compile to predict_action_chunk method if enabled
-    if cfg.use_torch_compile:
-        policy = _apply_torch_compile(policy, cfg)
-
-    # Create robot
-    logger.info(f"Initializing robot: {cfg.robot.type}")
-    robot = make_robot_from_config(cfg.robot)
-    robot.connect()
-    robot_wrapper = RobotWrapper(robot)
+    # if cfg.use_torch_compile:
+    #     policy = _apply_torch_compile(policy, cfg)
 
     # Create robot observation processor
     robot_observation_processor = make_default_robot_observation_processor()
     robot_action_processor = make_default_robot_action_processor()
+
+    preprocessor, postprocessor = make_pre_post_processors(
+        policy_cfg=cfg.policy,
+        pretrained_path=cfg.policy.pretrained_path,
+        dataset_stats=None,  # Will load from pretrained processor files
+        preprocessor_overrides={
+            "device_processor": {"device": cfg.policy.device},
+        },
+    )
+
+    # Create robot
+    logger.info(f"Initializing robot: {cfg.robot.type}")
+    robot = make_robot_from_config(cfg.robot)
+    robot_wrapper = RobotWrapper(robot)
+
+    # Warm start policy with dummy since initial inference can hog all cpu and cause robot timeouts
+    print("Warming up policy to prevent initial inference lag...")
+    warmstart_policy(policy, robot_wrapper, robot_observation_processor, preprocessor, postprocessor, cfg)
+    print("Policy warmup completed!")
+
+    # Connect to robot
+    robot.connect()
 
     # Create action queue for communication between threads
     action_queue = ActionQueue(cfg.rtc)
@@ -489,7 +543,7 @@ def demo_cli(cfg: RTCDemoConfig):
     # Start chunk requester thread
     get_actions_thread = Thread(
         target=get_actions,
-        args=(policy, robot_wrapper, robot_observation_processor, action_queue, shutdown_event, cfg),
+        args=(policy, robot_wrapper, robot_observation_processor, preprocessor, postprocessor, action_queue, shutdown_event, cfg),
         daemon=True,
         name="GetActions",
     )
@@ -516,8 +570,8 @@ def demo_cli(cfg: RTCDemoConfig):
         time.sleep(10)
 
         # Log queue status periodically
-        if int(time.time() - start_time) % 5 == 0:
-            logger.info(f"[MAIN] Action queue size: {action_queue.qsize()}")
+        # if int(time.time() - start_time) % 5 == 0:
+        #     logger.info(f"[MAIN] Action queue size: {action_queue.qsize()}")
 
         if time.time() - start_time > cfg.duration:
             break
@@ -545,5 +599,6 @@ def demo_cli(cfg: RTCDemoConfig):
 
 
 if __name__ == "__main__":
+    register_third_party_plugins()
     demo_cli()
     logging.info("RTC demo finished")

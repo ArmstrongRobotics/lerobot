@@ -52,6 +52,11 @@ class PI05Config(PreTrainedConfig):
 
     predict_delta_state: bool = True
 
+    # Finetuning settings
+    freeze_vision_encoder: bool = True
+    train_expert_only: bool = True
+    train_state_proj: bool = True
+
     # LoRA 
     lora_r: int = 8
     lora_alpha: int = 16

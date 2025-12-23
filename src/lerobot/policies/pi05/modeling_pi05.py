@@ -345,6 +345,8 @@ class PaliGemmaWithExpertModel(
         lora_target_modules: tuple[str, ...] = ("q_proj", "k_proj", "v_proj", "o_proj"),
         lora_on_vlm: bool = True,
         lora_on_expert: bool = False,
+        train_expert_only: bool = True,
+        freeze_vision_encoder: bool = False,
     ):
         if use_adarms is None:
             use_adarms = [False, False]
@@ -389,6 +391,8 @@ class PaliGemmaWithExpertModel(
         self.lora_target_modules = lora_target_modules
         self.lora_on_vlm = lora_on_vlm
         self.lora_on_expert = lora_on_expert
+        self.train_expert_only = train_expert_only
+        self.freeze_vision_encoder = freeze_vision_encoder
 
         self.paligemma = PaliGemmaForConditionalGeneration(config=vlm_config_hf)
         self.gemma_expert = GemmaForCausalLM(config=action_expert_config_hf)
@@ -396,6 +400,11 @@ class PaliGemmaWithExpertModel(
 
         self.to_bfloat16_for_selected_params(precision)
 
+        if self.train_expert_only and self.lora_on_vlm:
+            raise ValueError("Cannot have both train_expert_only and lora_on_vlm set to True.")
+
+        if self.freeze_vision_encoder and self.lora_on_vlm:
+            raise ValueError("Cannot have both freeze_vision_encoder and lora_on_vlm set to True.")
 
         if self.lora_on_vlm:
             vlm_lora_config = LoraConfig(
@@ -418,6 +427,24 @@ class PaliGemmaWithExpertModel(
                 task_type=TaskType.FEATURE_EXTRACTION,
             )
             self.gemma_expert = get_peft_model(self.gemma_expert, expert_lora_config)
+
+        self.set_requires_grad()
+
+    def set_requires_grad(self):
+        # if self.freeze_vision_encoder:
+        if self.train_expert_only:
+            self.paligemma.eval()
+            for param in self.paligemma.parameters():
+                param.requires_grad = False
+        elif self.lora_on_vlm:
+            for name, param in self.paligemma.named_parameters():
+                if "lora_" not in name:
+                    param.requires_grad = False
+        
+        if self.lora_on_expert:
+            for name, param in self.gemma_expert.named_parameters():
+                if "lora_" not in name:
+                    param.requires_grad = False
 
     def to_bfloat16_for_selected_params(self, precision: Literal["bfloat16", "float32"] = "bfloat16"):
         if precision == "bfloat16":
@@ -581,10 +608,15 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
 
         # Compile model if requested
         if config.compile_model:
+            print("Compiling PI05Pytorch model...")
             torch.set_float32_matmul_precision("high")
-            self.sample_actions = torch.compile(self.sample_actions, mode=config.compile_mode)
+            compile_kwargs = {}
+            compile_kwargs["options"] = {"triton.cudagraphs": False, "epilogue_fusion": False}
+            self.denoise_step = torch.compile(self.denoise_step, **compile_kwargs)
+            self.sample_actions_initial = torch.compile(self.sample_actions_initial, **compile_kwargs)
+            # self.sample_actions = torch.compile(self.sample_actions, mode=config.compile_mode)
             # Also compile the main forward pass used during training
-            self.forward = torch.compile(self.forward, mode=config.compile_mode)
+            # self.forward = torch.compile(self.forward, mode=config.compile_mode)
 
         msg = """An incorrect transformer version is used, please create an issue on https://github.com/huggingface/lerobot/issues"""
 
@@ -789,6 +821,31 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
 
         return F.mse_loss(u_t, v_t, reduction="none")
 
+    @torch.no_grad()
+    def sample_actions_initial(
+        self,
+        images,
+        img_masks,
+        tokens,
+        masks
+    ):
+        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, tokens, masks)
+        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
+        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
+
+        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
+        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
+
+        _, past_key_values = self.paligemma_with_expert.forward(
+            attention_mask=prefix_att_2d_masks_4d,
+            position_ids=prefix_position_ids,
+            past_key_values=None,
+            inputs_embeds=[prefix_embs, None],
+            use_cache=True,
+        )
+
+        return prefix_pad_masks, past_key_values
+
     @torch.no_grad()  # see openpi `sample_actions` (slightly adapted)
     def sample_actions(
         self,
@@ -816,19 +873,8 @@ class PI05Pytorch(nn.Module):  # see openpi `PI0Pytorch`
             )  # Use config max_action_dim for internal processing
             noise = self.sample_noise(actions_shape, device)
 
-        prefix_embs, prefix_pad_masks, prefix_att_masks = self.embed_prefix(images, img_masks, tokens, masks)
-        prefix_att_2d_masks = make_att_2d_masks(prefix_pad_masks, prefix_att_masks)
-        prefix_position_ids = torch.cumsum(prefix_pad_masks, dim=1) - 1
-
-        prefix_att_2d_masks_4d = self._prepare_attention_masks_4d(prefix_att_2d_masks)
-        self.paligemma_with_expert.paligemma.language_model.config._attn_implementation = "eager"  # noqa: SLF001
-
-        _, past_key_values = self.paligemma_with_expert.forward(
-            attention_mask=prefix_att_2d_masks_4d,
-            position_ids=prefix_position_ids,
-            past_key_values=None,
-            inputs_embeds=[prefix_embs, None],
-            use_cache=True,
+        prefix_pad_masks, past_key_values = self.sample_actions_initial(
+            images, img_masks, tokens, masks
         )
 
         dt = -1.0 / num_steps
@@ -1225,7 +1271,7 @@ class PI05Policy(PreTrainedPolicy):
             "RTC is not supported for select_action, use it with predict_action_chunk"
         )
 
-        self.eval()
+        # self.eval()
 
         # Action queue logic for n_action_steps > 1
         if len(self._action_queue) == 0:
@@ -1238,8 +1284,7 @@ class PI05Policy(PreTrainedPolicy):
     @torch.no_grad()
     def predict_action_chunk(self, batch: dict[str, Tensor], **kwargs: Unpack[ActionSelectKwargs]) -> Tensor:
         """Predict a chunk of actions given environment observations."""
-        print("PREDICTING NEW CHUNK")
-        self.eval()
+        # self.eval()
 
         # Prepare inputs
         images, img_masks = self._preprocess_images(batch)
