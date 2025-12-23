@@ -61,6 +61,7 @@ from lerobot.transport import (
     services_pb2,  # type: ignore
     services_pb2_grpc,  # type: ignore
 )
+from lerobot.utils.import_utils import register_third_party_plugins
 from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
 
 from .configs import RobotClientConfig
@@ -496,4 +497,5 @@ def async_client(cfg: RobotClientConfig):
 
 
 if __name__ == "__main__":
+    register_third_party_plugins()
     async_client()  # run the client
