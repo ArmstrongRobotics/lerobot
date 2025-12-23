@@ -1,0 +1,13 @@
+python -m lerobot.async_inference.robot_client \
+    --server_address=100.102.60.112:8080 \
+    --robot.type=lerobot_robot_i2rt \
+    --robot.id=follower \
+    --task="Pick up cups and place in tub" \
+    --policy_type=pi05 \
+    --robot.cameras="{ wrist.top: {type: opencv, index_or_path: /dev/video-wrist, width: 640, height: 480, fps: 30}, scene.top_down: {type: opencv, index_or_path: /dev/video-scene1, width: 640, height: 480, fps: 30}}" \
+    --pretrained_name_or_path=outputs/pi05_pnp_cup_merged_basic123_random_start_delta_joints_8x \
+    --policy_device=cuda \
+    --actions_per_chunk=50 \
+    --chunk_size_threshold=0.5 \
+    --aggregate_fn_name=weighted_average \
+    --debug_visualize_queue_size=False
