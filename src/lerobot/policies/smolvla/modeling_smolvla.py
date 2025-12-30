@@ -298,6 +298,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
 
+        if self.config.predict_delta_state:
+            actions[..., :-1] = batch[OBS_STATE].unsqueeze(1)[..., :-1] + actions[..., :-1]
+
         return actions
 
     def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:
@@ -317,8 +320,6 @@ class SmolVLAPolicy(PreTrainedPolicy):
         self._queues = populate_queues(self._queues, batch, exclude_keys=[ACTION])
 
         actions = self._get_action_chunk(batch, noise, **kwargs)
-        if self.config.predict_delta_state:
-            actions[..., :-1] = batch[OBS_STATE].unsqueeze(1)[..., :-1] + actions[..., :-1]
         return actions
 
     @torch.no_grad()
