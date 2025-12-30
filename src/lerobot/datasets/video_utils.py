@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from threading import Lock
 from typing import Any, ClassVar
+import math
 
 import av
 import fsspec
@@ -254,7 +255,13 @@ def decode_video_frames_torchcodec(
     metadata = decoder.metadata
     average_fps = metadata.average_fps
     # convert timestamps to frame indices
-    frame_indices = [round(ts * average_fps) for ts in timestamps]
+
+    num_frames = metadata.num_frames
+
+    frame_indices = [
+        min(max(int(math.floor(ts * average_fps)), 0), num_frames - 1)
+        for ts in timestamps
+    ]
     # retrieve frames based on indices
     frames_batch = decoder.get_frames_at(indices=frame_indices)
 
@@ -272,15 +279,24 @@ def decode_video_frames_torchcodec(
     min_, argmin_ = dist.min(1)
 
     is_within_tol = min_ < tolerance_s
-    assert is_within_tol.all(), (
-        f"One or several query timestamps unexpectedly violate the tolerance ({min_[~is_within_tol]} > {tolerance_s=})."
-        "It means that the closest frame that can be loaded from the video is too far away in time."
-        "This might be due to synchronization issues with timestamps during data collection."
-        "To be safe, we advise to ignore this item during training."
-        f"\nqueried timestamps: {query_ts}"
-        f"\nloaded timestamps: {loaded_ts}"
-        f"\nvideo: {video_path}"
-    )
+    try:
+        assert is_within_tol.all(), (
+            f"One or several query timestamps unexpectedly violate the tolerance ({min_[~is_within_tol]} > {tolerance_s=})."
+            "It means that the closest frame that can be loaded from the video is too far away in time."
+            "This might be due to synchronization issues with timestamps during data collection."
+            "To be safe, we advise to ignore this item during training."
+            f"\nqueried timestamps: {query_ts}"
+            f"\nloaded timestamps: {loaded_ts}"
+            f"\nvideo: {video_path}"
+        )
+    except:
+        # Filter out invalid indices
+        valid_indices = torch.where(is_within_tol)[0].tolist()
+        loaded_frames = [loaded_frames[i] for i in range(len(loaded_frames)) if i not in valid_indices]
+        loaded_ts = torch.tensor([loaded_ts[i] for i in range(len(loaded_ts)) if i not in valid_indices])
+        # compute distances between each query timestamp and loaded timestamps
+        dist = torch.cdist(query_ts[:, None], loaded_ts[:, None], p=1)
+        min_, argmin_ = dist.min(1)
 
     # get closest frames to the query timestamps
     closest_frames = torch.stack([loaded_frames[idx] for idx in argmin_])

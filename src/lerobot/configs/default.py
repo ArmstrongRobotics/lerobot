@@ -35,6 +35,7 @@ class DatasetConfig:
     use_imagenet_stats: bool = True
     video_backend: str = field(default_factory=get_safe_default_codec)
     streaming: bool = False
+    streaming_tolerance_s: float = 0.037  # 30fps one frame tolerance
 
 
 @dataclass
