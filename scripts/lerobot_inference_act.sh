@@ -1,5 +1,5 @@
-policy=act_pnp_cup_merged_basic123_random_start_delta_joints_8x
-checkpoint=440000  # or last
+policy=act_pnp_9in_plates_recover_finger_merged
+checkpoint=140000  # or last
 episode_time_s=10000
 num_episodes=24
 repo_id=${HF_USER}/eval_${policy}_test
@@ -12,14 +12,16 @@ lerobot-record \
   --robot.id=follower \
   --teleop.type=lerobot_teleoperator_i2rt \
   --teleop.id=leader \
+  --teleop.can_channel=can_leader_l \
   --display_data=true \
-  --policy.n_action_steps=25 \
+  --policy.n_action_steps=100 \
   --dataset.push_to_hub=False \
   --dataset.repo_id=${repo_id} \
   --dataset.num_episodes=${num_episodes} \
   --dataset.episode_time_s=${episode_time_s} \
-  --dataset.single_task="Pick up cups and place in tub" \
-  --policy.path=outputs/train/${policy}/checkpoints/${checkpoint}/pretrained_model \
+  --dataset.single_task="Pick up plates from tub and place into rack" \
+  --policy.path=/home/armstrong/i2rt_repos/lerobot/outputs/train/${policy}/checkpoints/${checkpoint}/pretrained_model \
+  --robot.can_channel=can_follower_l \
   --robot.cameras="{ wrist.top: {type: opencv, index_or_path: /dev/video-wrist, width: 640, height: 480, fps: 30}, scene.top_down: {type: opencv, index_or_path: /dev/video-scene1, width: 640, height: 480, fps: 30}}"
 
 

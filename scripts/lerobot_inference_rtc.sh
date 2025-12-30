@@ -1,6 +1,6 @@
-# policy=smolVLA_pnp_cup_merged_basic123_random_start
-policy=pi05_pnp_cup_merged_basic123_random_start_delta_joints_8x
-checkpoint=160000  # or last
+policy=smolVLA_pnp_cup_merged_basic123_random_start
+# policy=pi05_pnp_cup_merged_basic123_random_start_delta_joints_8x
+checkpoint=005000  # or last
 episode_time_s=10000
 
 TORCH_LOGS="recompiles,graph_breaks" python lerobot/examples/rtc/eval_with_real_robot.py \
@@ -10,10 +10,11 @@ TORCH_LOGS="recompiles,graph_breaks" python lerobot/examples/rtc/eval_with_real_
     --rtc.execution_horizon=10 \
     --task="Pick up cups and place in tub" \
     --duration=${episode_time_s} \
-    --policy.path=${HF_USER}/${policy} \
-    --policy.compile_model=true \
+    --policy.path=/home/armstrong/i2rt_repos/lerobot/outputs/train/${policy}/checkpoints/${checkpoint}/pretrained_model \
     --use_torch_compile=false \
+    --robot.can_channel=can_follower_l \
     --robot.cameras="{ wrist.top: {type: opencv, index_or_path: /dev/video-wrist, width: 640, height: 480, fps: 30}, scene.top_down: {type: opencv, index_or_path: /dev/video-scene1, width: 640, height: 480, fps: 30}}" 
     # --dataset.rename_map='{"observation.images.scene.top_down": "observation.images.camera1", "observation.images.wrist.top": "observation.images.camera2"}'
     # --teleop.type=lerobot_teleoperator_i2rt \
     # --teleop.id=leader \
+    # --policy.compile_model=true \

@@ -3,7 +3,9 @@ lerobot-teleoperate \
     --robot.id=follower \
     --teleop.type=lerobot_teleoperator_i2rt \
     --teleop.id=leader \
+    --teleop.can_channel=can_leader_l \
     --display_data=true \
+    --robot.can_channel=can_follower_l \
     --robot.cameras="{ wrist: {type: opencv, index_or_path: /dev/video-wrist, width: 640, height: 480, fps: 30}, scene_cam1: {type: opencv, index_or_path: /dev/video-scene1, width: 640, height: 480, fps: 30}}" \
     --robot.follower_gripper_min=0.0 \
     --robot.follower_gripper_max=0.8 \
