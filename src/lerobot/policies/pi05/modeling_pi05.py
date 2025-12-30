@@ -49,7 +49,7 @@ from lerobot.utils.constants import (
     OBS_LANGUAGE_ATTENTION_MASK,
     OBS_LANGUAGE_TOKENS,
     OPENPI_ATTENTION_MASK_VALUE,
-    OBS_ENV_STATE
+    OBS_STATE
 )
 
 from peft import LoraConfig, get_peft_model, TaskType
@@ -1299,7 +1299,7 @@ class PI05Policy(PreTrainedPolicy):
 
         if self.config.predict_delta_state:
             # Gripper actions are absolute, not delta
-            actions[..., :-1] = batch[f"{OBS_ENV_STATE}"].unsqueeze(1)[..., :-1] + actions[..., :-1]
+            actions[..., :-1] = batch[f"{OBS_STATE}"].unsqueeze(1)[..., :-1] + actions[..., :-1]
         return actions
 
     def forward(self, batch: dict[str, Tensor]) -> tuple[Tensor, dict]:
