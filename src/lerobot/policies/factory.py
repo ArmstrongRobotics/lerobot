@@ -42,13 +42,14 @@ from lerobot.policies.tdmpc.configuration_tdmpc import TDMPCConfig
 from lerobot.policies.utils import validate_visual_features_consistency
 from lerobot.policies.vqbet.configuration_vqbet import VQBeTConfig
 from lerobot.policies.xvla.configuration_xvla import XVLAConfig
-from lerobot.processor import PolicyAction, PolicyProcessorPipeline
+from lerobot.processor import PolicyAction, PolicyProcessorPipeline, DeltaRobotActionProcessorStep
 from lerobot.processor.converters import (
     batch_to_transition,
     policy_action_to_transition,
     transition_to_batch,
     transition_to_policy_action,
 )
+from lerobot.processor import NormalizerProcessorStep
 from lerobot.utils.constants import POLICY_POSTPROCESSOR_DEFAULT_NAME, POLICY_PREPROCESSOR_DEFAULT_NAME
 
 
@@ -191,6 +192,36 @@ class ProcessorConfigKwargs(TypedDict, total=False):
     dataset_stats: dict[str, dict[str, torch.Tensor]] | None
 
 
+def add_delta_state_processor_if_needed(processor_pipeline: PolicyProcessorPipeline[Any, Any], policy_cfg, is_preprocess: bool) -> PolicyProcessorPipeline[Any, Any]:
+    # Need to add this here because training pi05/smolvla loads pretrained processors, so need to insert after loading
+    if not policy_cfg.predict_delta_state:
+        return processor_pipeline
+    
+    # Check if DeltaRobotActionProcessorStep is already in the pipeline
+    for step in processor_pipeline.steps:
+        if isinstance(step, DeltaRobotActionProcessorStep):
+            return processor_pipeline  # Already present, return as is
+
+    # If not present, add it at the end of the pipeline
+    new_steps = processor_pipeline.steps
+    index = None
+    for i, step in enumerate(new_steps):
+        if isinstance(step, NormalizerProcessorStep):
+            index = i + 1  # Insert after normalization
+            break
+    if index is not None:
+        new_steps.insert(
+            index, DeltaRobotActionProcessorStep(is_preprocess=is_preprocess, active=True)
+        )
+    
+    return PolicyProcessorPipeline[Any, Any](
+        steps=new_steps,
+        name=processor_pipeline.name,
+        to_transition=processor_pipeline.to_transition,
+        to_output=processor_pipeline.to_output,
+    )
+
+
 def make_pre_post_processors(
     policy_cfg: PreTrainedConfig,
     pretrained_path: str | None = None,
@@ -244,7 +275,7 @@ def make_pre_post_processors(
             kwargs["postprocessor_overrides"] = postprocessor_overrides
 
         return (
-            PolicyProcessorPipeline.from_pretrained(
+            add_delta_state_processor_if_needed(PolicyProcessorPipeline.from_pretrained(
                 pretrained_model_name_or_path=pretrained_path,
                 config_filename=kwargs.get(
                     "preprocessor_config_filename", f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json"
@@ -252,7 +283,7 @@ def make_pre_post_processors(
                 overrides=kwargs.get("preprocessor_overrides", {}),
                 to_transition=batch_to_transition,
                 to_output=transition_to_batch,
-            ),
+            ), policy_cfg, is_preprocess=True),
             PolicyProcessorPipeline.from_pretrained(
                 pretrained_model_name_or_path=pretrained_path,
                 config_filename=kwargs.get(

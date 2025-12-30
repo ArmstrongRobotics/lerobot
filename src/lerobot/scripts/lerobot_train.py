@@ -52,6 +52,9 @@ from lerobot.utils.utils import (
     init_logging,
 )
 
+import torch
+torch.set_printoptions(sci_mode=False, precision=4)
+
 
 def update_policy(
     train_metrics: MetricsTracker,

@@ -128,6 +128,8 @@ from lerobot.utils.utils import (
 )
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 
+import torch
+torch.set_printoptions(sci_mode=False, precision=4)
 
 @dataclass
 class DatasetRecordConfig:
