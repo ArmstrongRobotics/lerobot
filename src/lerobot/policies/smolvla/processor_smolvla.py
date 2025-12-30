@@ -78,18 +78,23 @@ def make_smolvla_pre_post_processors(
             max_length=config.tokenizer_max_length,
         ),
         DeviceProcessorStep(device=config.device),
-        DeltaRobotActionProcessorStep(is_preprocess=True, active=config.predict_delta_state),
         NormalizerProcessorStep(
             features={**config.input_features, **config.output_features},
             norm_map=config.normalization_mapping,
             stats=dataset_stats,
         ),
+        # Crucial to do delta AFTER normalization. If we did before, then we would apply absolute joint statistics to delta joints.
+        # suppose for some joint, mean=1.4, std=0.3. obs=1.4, next_target_joint=1.5
+        # If do delta before normalization: normalized_delta = ( (1.5-1.4) - 1.4 ) / 0.3 = -4.3 far from expected N(0,1)
+        DeltaRobotActionProcessorStep(is_preprocess=True, active=config.predict_delta_state),
     ]
     output_steps = [
+        # NOTE: during inference, un-delta is already applied inside model's forward pass, so no need to do here
+        # Reason for this is model learns delta states for future chunk all relative to the initial state, rather than
+        # incrementally adding deltas, so need to add all deltas at once to the initial state
         UnnormalizerProcessorStep(
             features=config.output_features, norm_map=config.normalization_mapping, stats=dataset_stats
         ),
-        DeltaRobotActionProcessorStep(is_preprocess=False, active=config.predict_delta_state),
         DeviceProcessorStep(device="cpu"),
     ]
     return (
