@@ -1,5 +1,5 @@
 policy=act_pnp_9in_plates_recover_finger_merged
-checkpoint=140000  # or last
+checkpoint=200000  # or last
 episode_time_s=10000
 num_episodes=24
 repo_id=${HF_USER}/eval_${policy}_test
@@ -14,7 +14,7 @@ lerobot-record \
   --teleop.id=leader \
   --teleop.can_channel=can_leader_l \
   --display_data=true \
-  --policy.n_action_steps=100 \
+  --policy.n_action_steps=25 \
   --dataset.push_to_hub=False \
   --dataset.repo_id=${repo_id} \
   --dataset.num_episodes=${num_episodes} \
