@@ -127,9 +127,10 @@ def convert(input_repo_id: str, output_repo_id: str, aa_to_rot6d: bool = False, 
                     exception = e
                     time.sleep(5)
             if not done:
-                import pdb
-                pdb.set_trace()
-                raise e
+                # import pdb
+                # pdb.set_trace()
+                # Just skip this episode, could have been deleted with lerobot-edit-dataset
+                continue
 
     if push_to_hub:
         new_dataset.push_to_hub(tags=None, private=False)
